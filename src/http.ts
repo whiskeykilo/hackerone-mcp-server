@@ -38,6 +38,9 @@ function describeApiError(
       " calls are succeeding, it is the path.",
     403: " — your account lacks access to this program or endpoint",
     404: " — unknown handle/id, or wrong host (the API is api.hackerone.com)",
+    422:
+      " — a required field is missing or invalid; most programs now require" +
+      " severity_rating on create, and some require custom fields",
     429:
       " — rate limited. Do NOT retry immediately: on report_intents, retrying" +
       " during a lockout appears to extend it. Wait ~10 minutes of full silence.",

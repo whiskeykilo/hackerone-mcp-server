@@ -149,6 +149,9 @@ export async function getReport(reportId: string) {
     title: attrs.title,
     state: attrs.state,
     created_at: attrs.created_at,
+    // "Reported on" in the UI. Differs from created_at when the report began
+    // as a draft.
+    submitted_at: attrs.submitted_at ?? null,
     closed_at: attrs.closed_at,
     triaged_at: attrs.triaged_at,
     bounty_awarded_at: attrs.bounty_awarded_at,
@@ -907,6 +910,16 @@ export async function validateReport(input: ReportDraftInput) {
     const scopes = scopeRes.data;
     const weaknesses = weaknessRes.data;
     const exclusions = exclusionRes.data;
+
+    // Since 2026-09-21 most programs require severity on create and the API
+    // answers 422 without it. The Hacker API exposes no per-program flag, so
+    // this can only warn. "none" is a valid rating, distinct from omitting it.
+    if (!input.severity_rating) {
+      warn(
+        "No severity_rating set. Most programs now require one and reject the submission with 422 without it.",
+        "severity_rating"
+      );
+    }
 
     if (input.structured_scope_id != null && !scopeRes.ok) {
       // Unknown, not invalid — do not block a valid report on our own failure.

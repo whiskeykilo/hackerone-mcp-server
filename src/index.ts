@@ -396,6 +396,7 @@ tool(
   "submit_report",
   "Submit a report to HackerOne directly, bypassing the draft workflow. IRREVERSIBLE. " +
     "Run validate_report first to catch out-of-scope assets and unaccepted weaknesses. " +
+    "Most programs require severity_rating ('none' counts; omitting it does not) and answer 422 without it. " +
     "TRADE-OFF: this path can set severity, weakness and scope but CANNOT carry attachments. " +
     "The report-intent path can carry attachments but cannot set any of those three. " +
     "If the finding needs a screenshot or PoC file, use create_report_intent instead. " +
