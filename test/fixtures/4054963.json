@@ -1,0 +1,81 @@
+{
+  "id": "4054963",
+  "type": "report",
+  "attributes": {
+    "state": "pending-program-review",
+    "closed_at": null,
+    "last_program_activity_at": "2026-10-01T10:13:34.571Z",
+    "last_reporter_activity_at": "2026-09-24T01:11:57.789Z"
+  },
+  "relationships": {
+    "reporter": {
+      "data": {
+        "type": "user",
+        "attributes": {
+          "username": "whiskeykilo"
+        }
+      }
+    },
+    "activities": {
+      "data": [
+        {
+          "id": "44897465",
+          "type": "activity-comment",
+          "attributes": {
+            "message": "Hello @whiskeykilo,\n\nThank you for your submission!\n\nYour report has passed the preliminary review. Please note that this does not confirm validation, the status may change after further review.\n\nNext in the workflow is for our team to validate and reproduce the issue, evaluating its accuracy and security impact. You will be notified when the team has reviewed and made an assessment on your report.\n\nWe'll keep you updated as the process moves forward. Have a great day!\n\nThanks,\nhackerone-agent",
+            "created_at": "2026-09-23T23:10:41.771Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "hackerone-agent"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "44898892",
+          "type": "activity-comment",
+          "attributes": {
+            "message": "POC is verified working on today's release as well, GitLab 19.4.1-ee (revision 26212baacad)",
+            "created_at": "2026-09-24T01:11:57.789Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "whiskeykilo"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "45112413",
+          "type": "activity-bug-pending-program-review",
+          "attributes": {
+            "message": "Hello @whiskeykilo,\n\nThank you for your submission! We were able to validate your report, and have submitted it to the appropriate remediation team for review. They will let us know the final ruling on this report, and when/if a fix will be implemented. Please note that the status and severity are subject to change.\n\nThanks,\n@h1_analyst_dante",
+            "created_at": "2026-10-01T10:13:34.571Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "h1_analyst_dante"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

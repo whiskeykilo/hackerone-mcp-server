@@ -1,0 +1,100 @@
+{
+  "id": "4103694",
+  "type": "report",
+  "attributes": {
+    "state": "triaged",
+    "closed_at": null,
+    "last_program_activity_at": "2026-10-11T04:01:12.276Z",
+    "last_reporter_activity_at": "2026-10-10T19:49:25.215Z"
+  },
+  "relationships": {
+    "reporter": {
+      "data": {
+        "type": "user",
+        "attributes": {
+          "username": "whiskeykilo"
+        }
+      }
+    },
+    "activities": {
+      "data": [
+        {
+          "id": "45385125",
+          "type": "activity-report-title-updated",
+          "attributes": {
+            "message": "",
+            "created_at": "2026-10-10T19:49:29.918Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "socmate"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "45388974",
+          "type": "activity-report-severity-updated",
+          "attributes": {
+            "message": "The official vector is CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H",
+            "created_at": "2026-10-11T03:26:15.443Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "42x42"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "45389273",
+          "type": "activity-bug-triaged",
+          "attributes": {
+            "message": "Thank you for your submission. We were able to validate your report, and have submitted it to the respective team for review. They will let us know the final ruling on this report, and when/if a fix will be implemented. Please note that the status and severity are subject to change.\n\nWe appreciate your help in keeping 8x8 and our customers safe and secure.\n",
+            "created_at": "2026-10-11T04:01:01.707Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "42x42"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "45389276",
+          "type": "activity-not-eligible-for-bounty",
+          "attributes": {
+            "message": "After reviewing your submission against our Program Policy & scope, this report is not eligible for a bounty reward but will be addressed under our Responsible Disclosure Program (RDP).\n\nWe appreciate your effort and contribution to the security posture of 8x8.",
+            "created_at": "2026-10-11T04:01:12.276Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "42x42"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

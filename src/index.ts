@@ -72,7 +72,15 @@ tool(
   "search_reports",
   "Search and list your HackerOne reports. Filter by keyword, program, severity, or state. " +
     "Note: HackerOne's report list endpoint ignores server-side filters, so any filter here " +
-    "paginates your full report history and filters locally — slower, but actually correct.",
+    "paginates your full report history and filters locally — slower, but actually correct. " +
+    "Each result has program_posted_last, which only compares timestamps: the report is open and " +
+    "the program acted after you did, including status changes and boilerplate. It also has " +
+    "awaiting_your_reply with awaiting_reason, which say whether the program actually wants " +
+    "something from you. Extra request cost: one GET of /hackers/reports/{id} for each " +
+    "returned result where program_posted_last is true. With awaiting_reply, that GET happens " +
+    "for every matching report where program_posted_last is true, before results are sliced. " +
+    "Closed reports and reports where you spoke last cost nothing extra. Timelines are cached " +
+    "for 60s, so a get_report call right after is free.",
   {
     query: z.string().optional().describe("Keyword matched against title, vulnerability info, and asset"),
     program: z.string().optional().describe("Program handle to filter by"),
@@ -85,7 +93,11 @@ tool(
       .boolean()
       .optional()
       .describe(
-        "Only open reports where the program posted after you last did — i.e. the ball is in your court."
+        "Only reports where the program wants something from you: state needs-more-info, or, " +
+          "since your last activity, a program comment that is not known boilerplate or an " +
+          "unanswered needs-more-info request. Status changes alone (triaged, " +
+          "pending-program-review, severity/title/scope edits, bounty decisions) do not count. " +
+          "Costs one extra GET per open report where program_posted_last is true."
       ),
     page_size: z.number().min(1).max(100).optional().describe("Results to return (default 25)"),
     page_number: z.number().optional().describe("Page number; only used when no filter is set"),

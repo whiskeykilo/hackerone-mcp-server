@@ -1,0 +1,62 @@
+{
+  "id": "4067153",
+  "type": "report",
+  "attributes": {
+    "state": "new",
+    "closed_at": null,
+    "last_program_activity_at": "2026-09-28T18:04:18.290Z",
+    "last_reporter_activity_at": "2026-09-28T15:33:10.823Z"
+  },
+  "relationships": {
+    "reporter": {
+      "data": {
+        "type": "user",
+        "attributes": {
+          "username": "whiskeykilo"
+        }
+      }
+    },
+    "activities": {
+      "data": [
+        {
+          "id": "45027194",
+          "type": "activity-changed-scope",
+          "attributes": {
+            "message": "",
+            "created_at": "2026-09-28T18:04:17.860Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "h1_analyst_diablo"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "45027196",
+          "type": "activity-comment",
+          "attributes": {
+            "message": "Hello @whiskeykilo,\n\nThank you for your submission!\n\nYour report has passed the preliminary analyst review. Please note that this does not confirm validation — the status may change after further review.\n\nNext in workflow is for our team to validate and reproduce the issue, evaluating its accuracy and security impact. You will be notified when the team has reviewed and made an assessment on your report.\n\nWe’ll keep you updated as the process moves forward. Have a great day!\n\nThanks,\n@h1_analyst_diablo",
+            "created_at": "2026-09-28T18:04:18.290Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "h1_analyst_diablo"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

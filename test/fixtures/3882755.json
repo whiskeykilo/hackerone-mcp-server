@@ -1,0 +1,43 @@
+{
+  "id": "3882755",
+  "type": "report",
+  "attributes": {
+    "state": "pending-program-review",
+    "closed_at": null,
+    "last_program_activity_at": "2026-10-02T11:33:28.567Z",
+    "last_reporter_activity_at": "2026-07-22T21:48:01.751Z"
+  },
+  "relationships": {
+    "reporter": {
+      "data": {
+        "type": "user",
+        "attributes": {
+          "username": "whiskeykilo"
+        }
+      }
+    },
+    "activities": {
+      "data": [
+        {
+          "id": "45145365",
+          "type": "activity-bug-pending-program-review",
+          "attributes": {
+            "message": "Hi @whiskeykilo,\n\nI'm discussing this submission internally with the Mapbox team. You will be updated as soon as there is additional information to share. Thank you for your patience!\n\n@h1_analyst_tyson",
+            "created_at": "2026-10-02T11:33:28.567Z",
+            "internal": null
+          },
+          "relationships": {
+            "actor": {
+              "data": {
+                "type": "user",
+                "attributes": {
+                  "username": "h1_analyst_tyson"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
