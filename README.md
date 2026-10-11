@@ -130,7 +130,7 @@ irreversible write without parsing prose. 19 are read-only; 7 mutate, of which
 | Tool | Description |
 |------|-------------|
 | `validate_report` | Check a report against live scope, weaknesses, and reward exclusions |
-| `search_reports` | Filter your reports by keyword, program, severity, state, or `awaiting_reply` |
+| `search_reports` | Filter your reports by keyword, program, severity, state, or `awaiting_reply`. That filter keeps reports in needs-more-info, or with a program comment since your last activity that is not boilerplate. Status changes don't count. It costs one extra GET per open report where the program acted last |
 | `get_report` | A report, optionally with its timeline — pass `include: ["conversation"]` or `["activities"]` |
 | `list_programs` | Programs you can access, filterable by `bookmarked_only`, submission state, bounties |
 | `get_program_details` | Program metadata, bounty settings, and your own stats for it |
@@ -244,7 +244,24 @@ A genuine 403 is none of the above and means something else entirely.
   account history. The populated fields are `last_program_activity_at`,
   `last_reporter_activity_at`, `first_program_activity_at` and
   `last_public_activity_at`. `search_reports` exposes those and derives
-  `awaiting_your_reply` from them (program spoke last, and the report is open).
+  `program_posted_last` from them: the report is open and the program acted
+  after you did. That is all the timestamps can tell you. Status changes
+  (triaged, pending-program-review, severity, title and scope edits, bounty
+  decisions) and boilerplate such as "passed the preliminary review" count as
+  acting.
+- **`awaiting_your_reply` reads the timeline.** For each open report where
+  `program_posted_last` is true, `search_reports` fetches
+  `/hackers/reports/{id}` (one GET, cached for 60s) and sets the flag when:
+  - the state is `needs-more-info`, or
+  - since your last activity, the program posted an `activity-bug-needs-more-info`
+    or an `activity-comment` that does not match a known boilerplate template.
+    A template that contains a `?` counts as a real comment.
+
+  Known status-change types are ignored. An unrecognised type counts as
+  awaiting if it carries text. `awaiting_reason` gives the cause, e.g.
+  `needs-more-info` or `program comment 2026-10-02`, and is `null` when
+  nothing is needed. The rules in `src/awaiting.ts` err toward flagging, and a
+  failed fetch also counts as awaiting.
 - **Earnings have only `{amount, created_at}`.** The award detail and the
   originating report are on the `bounty` relationship, not on the earning.
 

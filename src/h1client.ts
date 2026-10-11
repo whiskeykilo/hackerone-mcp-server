@@ -1,3 +1,4 @@
+import { classifyAwaiting, type AwaitingVerdict } from "./awaiting.js";
 import { H1_BASE, h1FetchAll, h1Request, sleep } from "./http.js";
 
 export type Severity = "none" | "low" | "medium" | "high" | "critical";
@@ -13,7 +14,11 @@ export interface SearchReportsOpts {
   program?: string;
   severity?: string;
   state?: string;
-  /** Only reports where the program replied after you last did. */
+  /**
+   * Only reports where the program wants something from you: needs-more-info,
+   * or a real comment (not a status change or boilerplate) after your last
+   * activity. See classifyAwaiting.
+   */
   awaiting_reply?: boolean;
   page_size?: number;
   page_number?: number;
@@ -56,9 +61,6 @@ export async function searchReports(opts: SearchReportsOpts = {}) {
   if (opts.state) {
     reports = reports.filter((r) => r.state === opts.state);
   }
-  if (opts.awaiting_reply) {
-    reports = reports.filter((r) => r.awaiting_your_reply);
-  }
   if (opts.query) {
     const q = opts.query.toLowerCase();
     reports = reports.filter(
@@ -80,10 +82,19 @@ export async function searchReports(opts: SearchReportsOpts = {}) {
     });
   }
 
-  const matched = reports.length;
-  if (needsFilter) reports = reports.slice(0, requestedSize);
+  // Classifying a report costs one GET. The awaiting_reply filter has to
+  // classify every candidate before it can slice. Without it, only the page
+  // being returned is classified.
+  let matched = reports.length;
+  if (needsFilter && !opts.awaiting_reply) reports = reports.slice(0, requestedSize);
+  let withVerdict = await attachAwaiting(reports);
+  if (opts.awaiting_reply) {
+    withVerdict = withVerdict.filter((r) => r.awaiting_your_reply);
+    matched = withVerdict.length;
+    withVerdict = withVerdict.slice(0, requestedSize);
+  }
   return {
-    count: reports.length,
+    count: withVerdict.length,
     matched,
     ...(truncated
       ? {
@@ -91,11 +102,49 @@ export async function searchReports(opts: SearchReportsOpts = {}) {
           note: `Scanned the first ${(opts.max_pages ?? 20) * 100} reports only; older ones were not searched. Raise max_pages to go further.`,
         }
       : {}),
-    results: reports.map(({ _vuln_info, ...rest }) => rest),
+    results: withVerdict.map(({ _vuln_info, ...rest }) => rest),
   };
 }
 
-function awaitingReply(attrs: any): boolean {
+/**
+ * Adds awaiting_your_reply and awaiting_reason. A timeline is fetched only for
+ * open reports where program_posted_last is true. Fetches run one at a time
+ * through h1Request, which applies the read rate limit and the 60s cache, so a
+ * get_report call right after this one is free.
+ */
+async function attachAwaiting<T extends ReturnType<typeof mapReportSummary>>(
+  reports: T[]
+): Promise<(T & AwaitingVerdict)[]> {
+  const out: (T & AwaitingVerdict)[] = [];
+  for (const r of reports) {
+    let verdict: AwaitingVerdict;
+    if (r.state === "needs-more-info") {
+      verdict = { awaiting_your_reply: true, awaiting_reason: "needs-more-info" };
+    } else if (!r.program_posted_last) {
+      verdict = { awaiting_your_reply: false, awaiting_reason: null };
+    } else {
+      try {
+        const data = await h1Request(`/hackers/reports/${r.id}`);
+        verdict = classifyAwaiting(data.data);
+      } catch (err: any) {
+        // If the timeline could not be read, the report counts as awaiting.
+        verdict = {
+          awaiting_your_reply: true,
+          awaiting_reason: `unverified: timeline fetch failed (${err?.message?.slice(0, 120) ?? err})`,
+        };
+      }
+    }
+    out.push({ ...r, ...verdict });
+  }
+  return out;
+}
+
+/**
+ * Timestamps only: the report is open and the program acted after you last
+ * did. Status changes and boilerplate count as acting, so this says nothing
+ * about whether a reply is needed. classifyAwaiting decides that.
+ */
+function programPostedLast(attrs: any): boolean {
   const prog = attrs.last_program_activity_at;
   const you = attrs.last_reporter_activity_at;
   if (!prog) return false;
@@ -127,8 +176,10 @@ function mapReportSummary(r: any) {
     last_reporter_activity_at: r.attributes.last_reporter_activity_at,
     first_program_activity_at: r.attributes.first_program_activity_at,
     last_public_activity_at: r.attributes.last_public_activity_at,
-    // The program spoke after you did: this report is waiting on your reply.
-    awaiting_your_reply: awaitingReply(r.attributes),
+    // Open, and the program acted after you last did. This includes status
+    // changes and boilerplate, so it does NOT mean a reply is needed.
+    // awaiting_your_reply, added by searchReports, says whether one is.
+    program_posted_last: programPostedLast(r.attributes),
     asset: scope?.asset_identifier ?? null,
     program: r.relationships?.program?.data?.attributes?.handle ?? null,
     _vuln_info: r.attributes.vulnerability_information,
