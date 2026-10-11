@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { classifyAwaiting, isBoilerplateComment } from "../dist/awaiting.js";
+import { asksSomething, classifyAwaiting, isBoilerplateComment } from "../dist/awaiting.js";
 
 // Recorded from GET /hackers/reports/{id} on 2026-10-11, trimmed to the fields
 // the classifier reads (no vulnerability text, no attachment URLs).
@@ -101,5 +101,46 @@ test("closed reports are never awaiting", () => {
     act("activity-comment", "2026-10-02T09:00:00.000Z", "Any other questions?"),
   ]);
   r.attributes.closed_at = "2026-10-02T10:00:00.000Z";
+  assert.equal(classifyAwaiting(r).awaiting_your_reply, false);
+});
+
+// Status changes with a request attached.
+test("a question attached to a status change is awaiting", () => {
+  const r = report("triaged", "2026-10-01T00:00:00.000Z", [
+    act("activity-bug-triaged", "2026-10-02T09:00:00.000Z",
+      "Triaged. Does this also affect the self-managed edition?"),
+  ]);
+  assert.deepEqual(classifyAwaiting(r), {
+    awaiting_your_reply: true,
+    awaiting_reason: "request in bug-triaged 2026-10-02",
+  });
+});
+
+test("an instruction with no question mark attached to a status change is awaiting", () => {
+  const r = report("pending-program-review", "2026-10-01T00:00:00.000Z", [
+    act("activity-bug-pending-program-review", "2026-10-02T09:00:00.000Z",
+      "Forwarded to the team. Please provide the HAR file from your second test run."),
+  ]);
+  assert.equal(classifyAwaiting(r).awaiting_reason, "request in bug-pending-program-review 2026-10-02");
+});
+
+test("a courtesy sign-off on a status change is not a request", () => {
+  // Wording from DoD activity-bug-resolved / activity-bug-duplicate messages.
+  const r = report("triaged", "2026-10-01T00:00:00.000Z", [
+    act("activity-bug-triaged", "2026-10-02T09:00:00.000Z",
+      "We have validated the vulnerability.\n\nIf you have any further questions or disagree that the report is resolved, please let us know."),
+  ]);
+  assert.equal(classifyAwaiting(r).awaiting_your_reply, false);
+});
+
+test("a courtesy sentence that also asks a real question still counts", () => {
+  assert.equal(asksSomething("If you have any questions, which build did you use?"), true);
+});
+
+test("a URL query string is not a question", () => {
+  const r = report("triaged", "2026-10-01T00:00:00.000Z", [
+    act("activity-bug-triaged", "2026-10-02T09:00:00.000Z",
+      "Tracked internally at https://example.com/issues?id=42."),
+  ]);
   assert.equal(classifyAwaiting(r).awaiting_your_reply, false);
 });

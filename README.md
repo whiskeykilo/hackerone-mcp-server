@@ -130,7 +130,7 @@ irreversible write without parsing prose. 19 are read-only; 7 mutate, of which
 | Tool | Description |
 |------|-------------|
 | `validate_report` | Check a report against live scope, weaknesses, and reward exclusions |
-| `search_reports` | Filter your reports by keyword, program, severity, state, or `awaiting_reply`. That filter keeps reports in needs-more-info, or with a program comment since your last activity that is not boilerplate. Status changes don't count. It costs one extra GET per open report where the program acted last |
+| `search_reports` | Filter your reports by keyword, program, severity, state, or `awaiting_reply`. That filter keeps reports in needs-more-info, or with a program comment since your last activity that is not boilerplate. A status change counts only if its message asks you something. It costs one extra GET per open report where the program acted last |
 | `get_report` | A report, optionally with its timeline — pass `include: ["conversation"]` or `["activities"]` |
 | `list_programs` | Programs you can access, filterable by `bookmarked_only`, submission state, bounties |
 | `get_program_details` | Program metadata, bounty settings, and your own stats for it |
@@ -253,12 +253,15 @@ A genuine 403 is none of the above and means something else entirely.
   `program_posted_last` is true, `search_reports` fetches
   `/hackers/reports/{id}` (one GET, cached for 60s) and sets the flag when:
   - the state is `needs-more-info`, or
-  - since your last activity, the program posted an `activity-bug-needs-more-info`
-    or an `activity-comment` that does not match a known boilerplate template.
-    A template that contains a `?` counts as a real comment.
+  - since your last activity, the program posted an `activity-bug-needs-more-info`,
+    an `activity-comment` that does not match a known boilerplate template, or
+    a status change whose message asks something.
 
-  Known status-change types are ignored. An unrecognised type counts as
-  awaiting if it carries text. `awaiting_reason` gives the cause, e.g.
+  "Asks something" means a `?`, "could/can/would you", "please
+  provide/confirm/retest/…", "we need/require more…" or "kindly". URLs and
+  sign-offs like "If you have any questions, please let us know" are removed
+  before checking. A template that asks something counts as a real comment.
+  An unrecognised type counts as awaiting if it carries text. `awaiting_reason` gives the cause, e.g.
   `needs-more-info` or `program comment 2026-10-02`, and is `null` when
   nothing is needed. The rules in `src/awaiting.ts` err toward flagging, and a
   failed fetch also counts as awaiting.
