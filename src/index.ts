@@ -95,8 +95,10 @@ tool(
       .describe(
         "Only reports where the program wants something from you: state needs-more-info, or, " +
           "since your last activity, a program comment that is not known boilerplate or an " +
-          "unanswered needs-more-info request. Status changes alone (triaged, " +
-          "pending-program-review, severity/title/scope edits, bounty decisions) do not count. " +
+          "unanswered needs-more-info request. Status changes (triaged, " +
+          "pending-program-review, severity/title/scope edits, bounty decisions) count only when " +
+          "their attached message asks something, such as a question or 'please provide/confirm/" +
+          "retest'. " +
           "Costs one extra GET per open report where program_posted_last is true."
       ),
     page_size: z.number().min(1).max(100).optional().describe("Results to return (default 25)"),

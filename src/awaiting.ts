@@ -18,10 +18,11 @@ export interface AwaitingVerdict {
 }
 
 /**
- * Timeline entries that report a status or metadata change. None of them asks
- * the reporter for anything on its own, even when the program attaches a
- * message. The list started from known types and was checked against every
- * type that appears in this account's 35 reports.
+ * Timeline entries that report a status or metadata change. The change itself
+ * asks the reporter for nothing. A message attached to one still counts when
+ * it asks something (see asksSomething): an analyst can triage and ask a
+ * question in the same activity. The list started from known types and was
+ * checked against every type that appears in this account's 35 reports.
  */
 export const NON_ACTIONABLE_TYPES = new Set([
   "activity-bug-new",
@@ -54,14 +55,38 @@ const BOILERPLATE_PHRASES: RegExp[] = [
   /we received your submission and will get back with you/i,
 ];
 
+// Courtesy sign-offs that look like requests but are not:
+// "If you have any further questions or disagree ..., please let us know."
+const COURTESY_SENTENCE = /[^.\n]*\bif you have any (further |other |more )?questions\b[^.\n]*/gi;
+const URL = /https?:\/\/\S+/g;
+// Any of these means the program is asking for something. "?" alone is not
+// enough, since requests are often phrased as instructions.
+const REQUEST =
+  /\?|\b(could|can|would) you\b|\bplease (provide|share|send|confirm|clarify|re-?test|verify|explain|upload|attach|let us know|update|respond|reply|advise)\b|\b(we|i) (need|require) (more|additional|further)\b|\bkindly\b/i;
+
+/**
+ * True when a message asks the reporter for something. URLs are removed first,
+ * so a query string does not count as a question, and so are courtesy
+ * sign-offs. Checked against every program message in this account. Outside
+ * needs-more-info requests, the only matches were courtesy sign-offs.
+ */
+export function asksSomething(message: string | null | undefined): boolean {
+  if (!message) return false;
+  const text = message
+    .replace(URL, "")
+    // A courtesy sentence that also contains a real question is kept.
+    .replace(COURTESY_SENTENCE, (m) => (m.includes("?") ? m : ""));
+  return REQUEST.test(text);
+}
+
 /**
  * A comment counts as boilerplate only when it matches a known template and
- * asks no question. A template with a question added to it is treated as a
- * real request.
+ * asks nothing. A template with a question added to it is treated as a real
+ * request.
  */
 export function isBoilerplateComment(message: string | null | undefined): boolean {
   if (!message) return false;
-  if (message.includes("?")) return false;
+  if (asksSomething(message)) return false;
   return BOILERPLATE_PHRASES.some((re) => re.test(message));
 }
 
@@ -122,7 +147,13 @@ export function classifyAwaiting(report: any): AwaitingVerdict {
       if (isBoilerplateComment(message)) continue;
       return { awaiting_your_reply: true, awaiting_reason: `program comment ${when}` };
     }
-    if (NON_ACTIONABLE_TYPES.has(a.type)) continue;
+    if (NON_ACTIONABLE_TYPES.has(a.type)) {
+      if (!asksSomething(message)) continue;
+      return {
+        awaiting_your_reply: true,
+        awaiting_reason: `request in ${a.type.replace(/^activity-/, "")} ${when}`,
+      };
+    }
     // A type this module does not know. It can only be ignored when it carries
     // no text.
     if (message.trim()) {
