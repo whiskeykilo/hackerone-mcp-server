@@ -28,8 +28,12 @@ export interface SearchReportsOpts {
 
 export async function searchReports(opts: SearchReportsOpts = {}) {
   const requestedSize = opts.page_size ?? 25;
+  // Sorting counts as a filter. The API returns pages oldest-first, so sorting
+  // a single page sorts the wrong reports: "-created_at" with page_size 9
+  // returned the 9 oldest.
   const needsFilter = !!(
-    opts.program || opts.severity || opts.state || opts.query || opts.awaiting_reply
+    opts.program || opts.severity || opts.state || opts.query || opts.awaiting_reply ||
+    opts.sort
   );
 
   let raw: any[];

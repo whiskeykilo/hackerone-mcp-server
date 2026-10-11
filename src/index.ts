@@ -102,8 +102,8 @@ tool(
           "Costs one extra GET per open report where program_posted_last is true."
       ),
     page_size: z.number().min(1).max(100).optional().describe("Results to return (default 25)"),
-    page_number: z.number().optional().describe("Page number; only used when no filter is set"),
-    sort: z.string().optional().describe("Sort field, e.g. '-created_at' for newest first"),
+    page_number: z.number().optional().describe("Page number; only used when no filter or sort is set"),
+    sort: z.string().optional().describe("Sort field, e.g. '-created_at' for newest first. Like a filter, this scans your full report history (up to max_pages) before sorting and taking page_size"),
     max_pages: z.number().min(1).max(50).optional().describe("Cap pages scanned when filtering (default 20)"),
   },
   (p) => h1.searchReports(p)
