@@ -1117,7 +1117,19 @@ export async function createReportIntent(opts: {
   });
   const intent = normalizeIntent(result.data);
   // The create response predates the assistant job, so it is already stale.
-  return opts.wait === false ? intent : waitForIntentReady(intent.id);
+  const current = opts.wait === false ? intent : await waitForIntentReady(intent.id);
+  return {
+    ...current,
+    // Keep the editing path visible even when a client's tool search omits it.
+    next_steps: {
+      tool: "update_report_intent",
+      arguments: { id: intent.id },
+      guidance:
+        "To revise this draft, supply its id and the full replacement description to update_report_intent. " +
+        "For inline attachment references, upload files to this same intent, then use their returned reference values in one update. " +
+        "Every create_report_intent call creates a separate draft; never reuse attachment references from another intent.",
+    },
+  };
 }
 
 export async function listReportIntents() {
@@ -1200,6 +1212,7 @@ export async function listIntentAttachments(id: string) {
   });
   return (result.data ?? []).map((a: any) => ({
     id: a.id,
+    reference: `{F${a.id}}`,
     file_name: a.attributes?.file_name,
     content_type: a.attributes?.content_type,
     file_size: a.attributes?.file_size,
@@ -1259,6 +1272,7 @@ export async function uploadIntentAttachments(id: string, filePaths: string[]) {
   const rows = Array.isArray(result.data) ? result.data : [result.data].filter(Boolean);
   return rows.map((a: any) => ({
     id: a.id,
+    reference: `{F${a.id}}`,
     file_name: a.attributes?.file_name,
     content_type: a.attributes?.content_type,
     file_size: a.attributes?.file_size,
