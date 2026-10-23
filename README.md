@@ -60,14 +60,33 @@ HackerOne's own draft mechanism is called a **report intent**. Create one, revie
 what HackerOne makes of it, then submit it as a real report — or delete it.
 Nothing is filed until you explicitly approve it.
 
+**Create once; edit with `update_report_intent`.** Every `create_report_intent`
+call creates a separate draft. To revise an existing draft, pass its `id` and
+the **full replacement description** to `update_report_intent`; it keeps the
+same draft and its attachments.
+
 ```
-create_report_intent  →  (review)  →  submit_report_intent(confirm: true)
+create_report_intent → upload_intent_attachments (if needed)
+                     → update_report_intent (same id, revised description)
+                     → (review) → submit_report_intent(confirm: true)
 ```
+
+For inline attachment citations, upload files to the created intent first.
+`upload_intent_attachments` and `list_intent_attachments` return a `reference`
+such as `{F123456}` for each file. Insert those values into the complete
+description and update **that same intent id**. Uploading the same files again
+produces new attachment ids, so references from another draft must not be
+reused. Review the processed description and attachments before submission.
+
+The server includes this workflow in its MCP initialization instructions and
+tool descriptions. Create results also include `next_steps` naming the update
+tool and the created intent id, so agents can find the edit path even when a
+tool search returns only part of the tool list.
 
 This server does not store drafts for you. Keep working copies wherever you
 like and push one to HackerOne when it is ready.
 
-Three things about intents are worth knowing, all verified against the live API:
+Other intent behavior verified against the live API:
 
 - **You cannot set the title.** HackerOne's assistant generates it, and rejects
   the attribute with a 400 if you try.
@@ -114,15 +133,15 @@ irreversible write without parsing prose. 19 are read-only; 7 mutate, of which
 
 | Tool | Annotation | Description |
 |------|-----------|-------------|
-| `create_report_intent` | write | Save a draft on HackerOne; waits for their assistant to reformat it |
+| `create_report_intent` | write | Create a new draft on every call; waits for assistant processing and returns update guidance |
 | `list_report_intents` | read | List your drafts and their states |
 | `get_report_intent` | read | Get one draft by id |
-| `update_report_intent` | write | Replace a draft's description and wait for reprocessing |
+| `update_report_intent` | write | Edit a draft in place with a full replacement description; keeps its id and attachments |
 | `wait_for_intent_ready` | read | Poll until the assistant job settles |
 | `delete_report_intent` | destructive | Delete a draft |
 | `submit_report_intent` | destructive | File a draft as a real report — requires `confirm: true` |
-| `list_intent_attachments` | read | List files attached to a draft |
-| `upload_intent_attachments` | write | Upload screenshots, PoC scripts, or HTTP logs |
+| `list_intent_attachments` | read | List files attached to a draft with their inline `{F...}` references |
+| `upload_intent_attachments` | write | Upload screenshots, PoC scripts, or HTTP logs and return their inline references |
 | `delete_intent_attachment` | destructive | Remove one attachment |
 
 ### Read
