@@ -1142,13 +1142,62 @@ export async function getReportIntent(id: string) {
   return normalizeIntent(result.data);
 }
 
-export async function updateReportIntent(id: string, description: string) {
+export async function updateReportIntent(id: string, description: string, timeoutMs = 60_000) {
+  const before = await getReportIntent(id);
+  if (before.state === "pending") {
+    throw new Error(
+      `Intent '${id}' is still pending. PATCH was not sent. ` +
+        `Use wait_for_intent_ready and review the draft before updating it.`
+    );
+  }
+  if (before.description === description) {
+    return {
+      ...before,
+      timed_out: false,
+      update_status: "already_current" as const,
+      description_matches_request: true,
+    };
+  }
+
   await h1Request(`/hackers/report_intents/${id}`, {
     method: "PATCH",
     body: { data: { type: "report-intent", id, attributes: { description } } },
   });
-  // The PATCH response echoes pre-job state, so re-read once the job settles.
-  return waitForIntentReady(id);
+
+  // A successful PATCH can be a silent no-op, observed on update_required
+  // drafts. Even a non-pending GET can still be stale, so keep reading until
+  // a changed description has settled or the verification deadline expires.
+  // The assistant may reformat the new text; exact equality is informative,
+  // but cannot be required for every valid update.
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const current = await getReportIntent(id);
+    const changed = typeof current.description === "string" && current.description !== before.description;
+    if (current.state !== "pending" && changed) {
+      return {
+        ...current,
+        timed_out: false,
+        update_status: "description_changed" as const,
+        description_matches_request: current.description === description,
+      };
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      const reason = current.state === "pending"
+        ? "assistant processing is still pending"
+        : current.description === before.description
+          ? "the description is still unchanged"
+          : "no updated description is available";
+      throw new Error(
+        `Update of intent '${id}' is not confirmed: PATCH returned success, but ${reason} ` +
+          `(state: ${current.state ?? "unknown"}) after ${timeoutMs}ms. ` +
+          `Review get_report_intent or the draft and assistant feedback in the HackerOne UI before retrying. ` +
+          `The PATCH was not retried and no new draft was created.`
+      );
+    }
+    await sleep(Math.min(2000, remaining));
+  }
 }
 
 export async function deleteReportIntent(id: string) {

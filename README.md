@@ -83,6 +83,24 @@ tool descriptions. Create results also include `next_steps` naming the update
 tool and the created intent id, so agents can find the edit path even when a
 tool search returns only part of the tool list.
 
+`update_report_intent` verifies the write with uncached reads. It saves the
+original description, sends one PATCH, and waits for a changed description
+with processing no longer `pending`. This catches a reported API edge case:
+an `update_required` draft can return HTTP success while retaining the old
+text. Stale reads are polled until `timeout_ms` (default 60 seconds); an
+unchanged description or unfinished processing then produces a **tool error**,
+not a successful update. Review the draft and assistant feedback before
+retrying. The server never retries the PATCH or creates a replacement draft.
+A draft that is already `pending` must settle before an update is attempted.
+
+Successful responses include `update_status: "description_changed"` and
+`description_matches_request`. The latter can be false because the assistant
+may rewrite the submitted text; a changed description alone does not prove
+that every requested edit survived, so review it. If the requested description
+already matches the existing text, the server skips PATCH and returns
+`update_status: "already_current"`. A rewrite back to the original text cannot
+be distinguished from a no-op and is reported as unconfirmed.
+
 This server does not store drafts for you. Keep working copies wherever you
 like and push one to HackerOne when it is ready.
 
@@ -136,7 +154,7 @@ irreversible write without parsing prose. 19 are read-only; 7 mutate, of which
 | `create_report_intent` | write | Create a new draft on every call; waits for assistant processing and returns update guidance |
 | `list_report_intents` | read | List your drafts and their states |
 | `get_report_intent` | read | Get one draft by id |
-| `update_report_intent` | write | Edit a draft in place with a full replacement description; keeps its id and attachments |
+| `update_report_intent` | write | Edit a draft in place and verify a changed description; keeps its id and attachments, errors on unconfirmed writes |
 | `wait_for_intent_ready` | read | Poll until the assistant job settles |
 | `delete_report_intent` | destructive | Delete a draft |
 | `submit_report_intent` | destructive | File a draft as a real report — requires `confirm: true` |
