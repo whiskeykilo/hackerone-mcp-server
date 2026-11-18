@@ -49,7 +49,7 @@ const BOILERPLATE_PHRASES: RegExp[] = [
   // HackerOne triage, posted by an analyst or by hackerone-agent:
   // "has passed the preliminary review" / "...preliminary analyst review"
   /passed the preliminary (analyst )?review/i,
-  // DoD VDP auto-acknowledgement
+  // A government VDP auto-acknowledgement
   /thank you for supporting the dod vulnerability disclosure program/i,
   // A program auto-acknowledgement
   /we received your submission and will get back with you/i,
