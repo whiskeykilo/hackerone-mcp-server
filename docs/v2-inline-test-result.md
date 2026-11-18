@@ -15,6 +15,6 @@ A synthetic, private test draft was staged using a dedicated test account. It wa
 
 The final-review browser used an isolated HuntProxy project/profile. Existing workspace files, projects, and browser sessions were not changed.
 
-See the [README](../README.md#preferred-report-assistant-v2-over-http) for the optional V2 environment configuration. Use a dedicated authenticated project/exchange and matching expected username. Session renewal may require a human handoff; routine draft HTTP requests do not require a browser.
+See the [README](../README.md#setting-up-v2-with-huntproxy) for the optional V2 environment configuration. Use a dedicated authenticated project/exchange and matching expected username. Session renewal may require a human handoff; routine draft HTTP requests do not require a browser.
 
 Account-specific configuration, draft URLs, passwords, MFA seeds, session cookies, CSRF tokens, and signed attachment URLs are intentionally omitted from this public verification record.

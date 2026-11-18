@@ -7,9 +7,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as h1 from "./h1client.js";
 import { intents } from "./intent-router.js";
 import { reportAssistantV2 } from "./h1v2.js";
+import { createRequire } from "node:module";
+
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
 const server = new McpServer(
-  { name: "hackerone", version: "3.1.0" },
+  { name: "hackerone", version },
   {
     instructions:
       "Report drafts are report intents. Normal intent tool names prefer V2 when configured. " +

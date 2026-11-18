@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { readFileSync } from "node:fs";
+
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 test("stdio server initializes and exposes valid tool schemas after dependency updates", async () => {
   const client = new Client({ name: "maintenance-test", version: "1.0.0" });
@@ -14,7 +17,7 @@ test("stdio server initializes and exposes valid tool schemas after dependency u
   });
   try {
     await client.connect(transport);
-    assert.equal(client.getServerVersion()?.version, "3.1.0");
+    assert.equal(client.getServerVersion()?.version, version);
     const { tools } = await client.listTools();
     assert.ok(tools.length > 20);
     const submitIntent = tools.find((t) => t.name === "submit_report_intent");

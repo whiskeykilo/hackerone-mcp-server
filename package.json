@@ -1,14 +1,38 @@
 {
   "name": "hackerone-mcp-server",
   "version": "3.1.0",
-  "description": "MCP server for HackerOne: local report drafting, scope research, and report submission",
+  "description": "MCP server for HackerOne: report triage, scope research, report drafting and submission",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "hackerone",
+    "bug-bounty",
+    "security",
+    "claude"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/whiskeykilo/hackerone-mcp-server.git"
+  },
+  "homepage": "https://github.com/whiskeykilo/hackerone-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/whiskeykilo/hackerone-mcp-server/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "hackerone-mcp-server": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "npm run build && node --test test/*.test.mjs"
@@ -18,11 +42,11 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }
