@@ -12,6 +12,8 @@ Go to **HackerOne > Settings > API Token** and generate one.
 
 ### 2. Install and build
 
+Use a maintained Node.js LTS release (Node.js 22 or newer recommended).
+
 ```bash
 git clone https://github.com/Sicks3c/hackerone-mcp-server.git
 cd hackerone-mcp-server
@@ -51,10 +53,83 @@ Or add manually to `~/.claude.json`:
 ```bash
 claude
 > /mcp
-# You should see "hackerone" listed with 26 tools
+# You should see "hackerone" and its tools listed
 ```
 
 ## Drafting a report
+
+### Preferred: Report Assistant V2 over HTTP
+
+The normal intent tools now **prefer V2 when configured**. V2 can save title,
+description, impact, manual severity, asset, weakness, and attachments together.
+Routine requests use HuntProxy's HTTP transport, **not browser automation**.
+A browser/human handoff may still be needed for initial login, expired sessions,
+or Cloudflare challenges. This is an unofficial web GraphQL integration and may
+change independently of the documented public API.
+
+Configure the MCP server process with:
+
+```text
+H1_V2_HUNTPROXY_PROJECT_ID=<dedicated HuntProxy project ID>
+H1_V2_HUNTPROXY_EXCHANGE_ID=<successful authenticated POST /graphql exchange ID>
+H1_V2_USERNAME=<expected HackerOne username>
+H1_V2_HUNTPROXY_COMMAND=/home/you/.local/bin/HuntProxy
+# Optional when using a non-default HuntProxy data directory:
+# H1_V2_HUNTPROXY_DATA_DIR=/path/to/private/huntproxy-data
+```
+
+Use a dedicated HuntProxy project/profile, log in to the intended account, and
+capture an authenticated `POST https://hackerone.com/graphql` request containing
+the session/CSRF headers. Only its exchange ID is needed here; do not copy
+passwords, MFA seeds, cookies, or CSRF tokens into this repository. The server
+keeps credentials inside HuntProxy and checks the logged-in username before
+writes. Public REST credentials remain separate and are not passed to HuntProxy.
+Check `get_report_assistant_v2_status` after setup.
+
+**Conservative fallback:** `version: "auto"` (default) chooses configured V2;
+when V2 is entirely unconfigured, it uses V1 with a warning. Partial/broken V2
+configuration, expired sessions, account mismatch, unsupported fields, and write
+errors do **not** trigger fallback. V1-only mode is available with
+`version: "v1"`; explicit `*_v2` tools always use V2. Pin the returned `backend`
+on subsequent calls. Existing V1 drafts are not automatically migrated. Fields
+V1 cannot save are rejected rather than silently discarded. Never switch paths
+after a failed creation, upload, or submission.
+
+```text
+create_report_intent(program_handle, title, description, impact, severity_rating)
+  -> upload_intent_attachments(id, version: "v2", file_paths)
+  -> update_report_intent(id, version: "v2", description containing returned {F...})
+  -> get_report_intent(id, version: "v2")
+  -> review and explicit approval
+  -> submit_report_intent(id, version: "v2", confirm: true,
+                          expected_updated_at: <reviewed updated_at>)
+```
+
+Inline screenshots use the returned `reference` (e.g. `{F123456}`) on its own
+line in the complete replacement description. Upload **first**, then save the
+references on the **same intent**. V2 uploads and saves are verified with fresh
+reads, and saves reject inline references that are not attached to that draft.
+An unchecked V2 draft may remain `pending` while still accepting edits/uploads;
+`wait_for_intent_ready` reports V2 readiness but does not run checks. Final
+submission refuses a changed draft or a state other than
+`ready_to_submit`; it is never retried automatically. The final submission
+operation is based on the shipped V2 client but **has not been live-tested**;
+identity verification, program eligibility, and pre-submission checks still apply.
+
+Additional explicit V2 tools: `search_report_programs_v2`,
+`list_report_intents_v2`, `get_report_intent_v2`, `create_report_intent_v2`,
+`update_report_intent_v2`, `upload_intent_attachments_v2`,
+`delete_intent_attachment_v2`, and `submit_report_intent_v2`. `create_report_intent_v2`
+creates an empty draft; the normal `create_report_intent` also saves initial content.
+For scope/weakness updates, use opaque GraphQL IDs, not numeric REST IDs. V2
+history is cursor-paginated; the normal list tool returns its first page and
+explicit `list_report_intents_v2` accepts the next cursor.
+
+See [verified V2 protocol findings](docs/report-assistant-v2-investigation.md).
+
+### Public API / V1 compatibility workflow
+
+The following description-only assistant behavior applies to `version: "v1"`.
 
 HackerOne's own draft mechanism is called a **report intent**. Create one, review
 what HackerOne makes of it, then submit it as a real report — or delete it.
@@ -102,15 +177,43 @@ already matches the existing text, the server skips PATCH and returns
 be distinguished from a no-op and is reported as unconfirmed.
 
 This server does not store drafts for you. Keep working copies wherever you
-like and push one to HackerOne when it is ready.
+like and push one to HackerOne when it is ready. The optional V2 path relies on
+HuntProxy's private persisted session/traffic store; treat that store as sensitive.
 
-Other intent behavior verified against the live API:
+### Manual severity error in Report Assistant V1
+
+If HackerOne says **"Select a manual severity rating before submitting this
+report."**, the V1 assistant can be blocked even though it has no severity
+selector. The V2 UI has a manual selector; this server cannot add one to V1.
+
+The [published intent API](https://api.hackerone.com/hacker-resources/)
+currently documents only `description` for PATCH and no submission body. There
+is no documented intent severity field to send. Adding severity text to the
+description is not the same as choosing a manual rating, and the server does
+not send guessed attributes or automatically recreate the draft.
+
+- Review the existing draft in V2 if available, or use HackerOne's standard
+  report form to set severity. Check content, program, and attachments before
+  submitting, and check whether a report already exists before switching paths.
+- `submit_report` supports `severity_rating` (`none`, `low`, `medium`, `high`,
+  `critical`) but **cannot carry attachments**. It creates a separate report,
+  not a conversion of the intent. Use it only after reviewing all fields and
+  obtaining fresh explicit approval; do not transfer intent attachment
+  references to a direct report and assume they will work.
+- A matching intent API error now explains this limitation. The failed request
+  is not retried and no replacement draft or direct submission is made.
+
+This is a HackerOne-side V1 UI/public-API mismatch. The optional V2 integration
+above can save manual severity using the verified web GraphQL operation; it does
+not add severity support to the public REST intent endpoint or migrate V1 drafts.
+
+Other intent behavior previously verified against the live API:
 
 - **You cannot set the title.** HackerOne's assistant generates it, and rejects
   the attribute with a 400 if you try.
-- **`description` is the only editable field.** Severity, weakness and scope
-  cannot be attached to an intent at all — they are set when the report is
-  filed, not while it is a draft.
+- **`description` is the only documented editable field.** This server cannot
+  set severity, weakness or scope on an intent. Do not assume HackerOne will
+  automatically supply a valid manual severity at submission time.
 - **Writes are asynchronous.** Creating or updating an intent queues an
   assistant job on HackerOne's side. The API responds *before* that job runs, so
   the response is already stale. `create_report_intent` and
@@ -322,12 +425,17 @@ the local counter but not HackerOne's.
 
 ### Safety properties
 
-- Only `submit_report` and `submit_report_intent` can file a report; both
-  require `confirm: true`, and their schemas tell the model to set it only on
+- Only `submit_report`, `submit_report_intent`, and `submit_report_intent_v2`
+  can file a report. All require `confirm: true`, and their schemas tell the model to set it only on
   explicit user approval rather than because the field is required.
-- **Non-idempotent writes are never retried.** A POST that fails at the network
+- **Non-idempotent writes are never retried after network failures.** A POST that fails at the network
   level may already have been processed, so retrying could file a duplicate
   report. The error says so and asks you to check state first.
+- Authenticated requests are restricted to HTTPS `api.hackerone.com/v1/` URLs;
+  pagination cannot forward credentials to another host, and redirects are
+  refused. Requests have a 30-second transport timeout. A timed-out write may
+  already have succeeded: inspect server-side state before retrying.
+- The read cache is bounded to 500 entries and cleared when credentials change.
 - `upload_intent_attachments` sends local files to a third party, so it refuses
   paths matching credential stores (`.claude.json`, `.ssh/`, `.aws/`, `.env`,
   private keys, `.pem`) and caps uploads at 25MB.
@@ -367,7 +475,7 @@ Analyze my report patterns — what severity gets resolved most?
 ## How It Works
 
 - Connects to the [HackerOne Hacker API v1](https://api.hackerone.com/hacker-resources/) using your personal API token
-- Runs locally over stdio — your credentials never leave your machine
+- Runs locally over stdio — public API credentials are sent only to HackerOne for authentication; optional V2 HTTP requests use session credentials retained inside HuntProxy
 - Auto-paginates by following the API's own `links.next` where the endpoint
   provides it; hacktivity and report intents do not, and are handled explicitly
 - Paginated results carry `count` and, when the page cap is hit, `truncated:
@@ -375,6 +483,19 @@ Analyze my report patterns — what severity gets resolved most?
 - List payloads are compact JSON, and `list_programs` never includes policy text
 - 60-second response cache on reads, invalidated on writes
 - Errors carry the status code, method, path, and response body
+
+## Development checks
+
+```bash
+npm ci
+npm test
+npm audit
+```
+
+Tests build the server, mock HackerOne requests, and smoke-test MCP initialization
+and tool schemas over stdio. They do not submit reports or contact the live
+HackerOne API. Restart your MCP client/server after updating so it loads the
+rebuilt `dist/` files and refreshed tool descriptions.
 
 ## License
 

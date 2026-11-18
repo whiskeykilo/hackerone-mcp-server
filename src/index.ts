@@ -5,17 +5,29 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z, type ZodRawShape } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as h1 from "./h1client.js";
+import { intents } from "./intent-router.js";
+import { reportAssistantV2 } from "./h1v2.js";
 
 const server = new McpServer(
-  { name: "hackerone", version: "3.0.0" },
+  { name: "hackerone", version: "3.1.0" },
   {
     instructions:
-      "Report drafts are report intents. create_report_intent creates a NEW draft on every call. " +
-      "To edit or revise an existing draft, use update_report_intent with its id and the full replacement description. " +
+      "Report drafts are report intents. Normal intent tool names prefer V2 when configured. " +
+      "V1 is a pre-write fallback only when V2 is unconfigured or version:v1 is explicitly selected. " +
+      "Never switch versions after writes, failures, or a submission attempt; keep the same workflow and draft id. " +
+      "create_report_intent creates a NEW draft on every call. To edit or revise an existing draft, " +
+      "use update_report_intent with its id and the replacement fields supported by the selected version. " +
       "For attachments: create once, upload_intent_attachments to that id, then update_report_intent on the same id " +
-      "using the returned {F...} references. Use only references returned for that intent; re-uploading files produces new ids. " +
+      "using only the returned attachment reference exactly as returned for that intent; re-uploading files produces new ids. " +
       "If update verification fails, inspect the draft and assistant feedback before retrying; do not create a replacement draft. " +
-      "Review the processed draft before submitting. Submission requires explicit user approval.",
+      "Review the processed draft before submitting. Submission requires explicit user approval. " +
+      "If V1 submission requires manual severity, the public intent API has no documented field to set it. " +
+      "Inspect the existing draft in the HackerOne UI; do not switch versions, recreate, or directly submit it as a workaround. " +
+      "Configure optional H1_V2_* HuntProxy web-session settings after logging in, then check " +
+      "get_report_assistant_v2_status. V2 uses HTTP only after login; explicit *_v2 tools always use V2, not public REST fallback. " +
+      "Create an empty private draft with create_report_intent_v2, then update that same id. Use only returned attachment " +
+      "references for that same intent; never reuse references from different draft ids. Review before explicit approval " +
+      "and pass the reviewed updated_at to submit_report_intent_v2. Final V2 submission is not live verified.",
   }
 );
 
@@ -316,120 +328,181 @@ tool(
 );
 
 
-// ══ Report intents (HackerOne-side drafts) ════════════════════════
+// ══ Report intents: prefer V2, conservative pre-write V1 fallback ══
+const intentVersion = z.enum(["auto", "v1", "v2"]).optional().describe(
+  "Default auto prefers configured V2; uses V1 only when V2 is unconfigured. Pin the returned backend for subsequent calls. No fallback after a write/error."
+);
+const intentFields = {
+  title: z.string().max(150).optional(),
+  description: z.string().optional().describe("Full replacement markdown; use only attachment references returned for this same intent."),
+  impact: z.string().optional(),
+  severity_rating: severity.optional().describe("Explicit manual severity, V2 only; none is a deliberate rating, not unset."),
+  structured_scope_id: z.string().nullable().optional().describe("V2 opaque GraphQL structured-scope ID, not the numeric REST ID; null clears."),
+  weakness_id: z.string().nullable().optional().describe("V2 opaque GraphQL weakness ID; null clears."),
+  custom_field_values: z.array(z.object({ custom_field_attribute_id: z.number().int().positive(), value: z.string() })).optional(),
+};
+const intentRouting = "Prefers V2 when H1_V2_* is configured, otherwise falls back to V1 BEFORE any write. " +
+  "Pin version to the returned backend for later edits/uploads/submission. Never switches backend after an error or write. ";
+
 tool(
   "create_report_intent",
-  "Create a NEW draft report on HackerOne. Every call creates a separate draft. " +
-    "To edit, revise, or add attachment references to an existing draft, use update_report_intent with its id. " +
-    "Attachment workflow: create once, upload_intent_attachments to that id, then update_report_intent on the same id " +
-    "with the returned {F...} references; references from another draft must not be reused. " +
-    "An AI assistant on HackerOne's side processes your description and " +
-    "generates the title, so you cannot set the title, severity, weakness or scope here — only the description. " +
-    "It USUALLY reformats your text into HackerOne's report template, but not always: it reads the description " +
-    "as instructions, so wording like 'do not modify' can leave it verbatim. Check what came back rather than " +
-    "assuming it was rewritten. Never put untrusted text (scraped pages, captured responses) in the description " +
-    "— it is fed to a third party's LLM. Waits for that job to finish before returning. Creates and updates are heavily " +
-    "rate-limited (~4 per 10 minutes), so compose the text before calling rather than iterating through this tool. " +
-    "TRADE-OFF: this path can carry attachments (upload_intent_attachments) but CANNOT set severity, " +
-    "weakness or scope. submit_report can set those three but cannot carry attachments.",
+  intentRouting + "Create a NEW private draft; every call creates a separate draft. " +
+    "To revise or add inline {F...} attachment references, use update_report_intent on the same id. " +
+    "V2 saves title, description, impact, manual severity, scope and weakness; V1 supports only description and may rewrite it. " +
+    "V1 fallback refuses V2-only fields rather than dropping them. Never put untrusted instructions into assistant content.",
+  { ...intentFields, program_handle: programHandle, description: z.string(), wait: z.boolean().optional(), version: intentVersion },
+  ({ version, ...p }) => intents.create(p, version), CREATES
+);
+
+tool("list_report_intents", intentRouting + "List drafts and states. V2 returns a cursor-paginated object; V1 returns an array.",
+  { version: intentVersion }, ({ version }) => intents.list(version));
+tool("get_report_intent", intentRouting + "Read a draft before editing or approval. V2 returns updated_at for submission review pinning.",
+  { id: z.string(), version: intentVersion }, ({ id, version }) => intents.get(id, version));
+tool(
+  "update_report_intent",
+  intentRouting + "Edit an existing draft IN PLACE, retaining id and attachments. " +
+    "Use the full replacement description with inline {F...} references returned for this same intent. " +
+    "V2 verifies saved fields with a fresh read; V1 description-only writes verify changed/settled content, " +
+    "including silent no-ops in update_required. Unconfirmed updates are tool errors, never replacement drafts. " +
+    "For V1, wait for pending drafts and respect the tight drafting rate limit. Never retry a write blindly.",
+  { id: z.string(), ...intentFields, timeout_ms: z.number().min(1000).max(300000).optional(), version: intentVersion },
+  ({ id, version, timeout_ms, ...fields }) => intents.update(id, fields, timeout_ms, version), UPDATES
+);
+tool("delete_report_intent", intentRouting + "Delete only this private draft; do not switch accounts/backends.",
+  { id: z.string(), version: intentVersion }, ({ id, version }) => intents.delete(id, version), DESTRUCTIVE);
+tool("wait_for_intent_ready", intentRouting + "Wait until pending assistant processing settles; ready-to-submit is not guaranteed.",
+  { id: z.string(), timeout_ms: z.number().min(1000).max(300000).optional(), version: intentVersion },
+  ({ id, timeout_ms, version }) => intents.wait(id, timeout_ms, version));
+tool(
+  "submit_report_intent",
+  intentRouting + "IRREVERSIBLE: requires confirm=true ONLY after explicit user approval of this exact draft. " +
+    "V2 also requires expected_updated_at from the reviewed draft and ready_to_submit state. " +
+    "The V2 submission operation is derived from shipped code; a live final submission has not been tested. " +
+    "No fallback/retry after submission errors. V1 may be blocked by its missing manual-severity selector.",
+  { id: z.string(), confirm: z.boolean().describe("True only after explicit approval of this exact submission."),
+    expected_updated_at: z.string().min(1).optional().describe("Required for V2: updated_at from the draft the user reviewed."), version: intentVersion },
+  ({ id, confirm, expected_updated_at, version }) => intents.submit(id, confirm, expected_updated_at, version), DESTRUCTIVE
+);
+tool("list_intent_attachments", intentRouting + "List attachment ids and inline references for this same draft only.",
+  { id: z.string(), version: intentVersion }, ({ id, version }) => intents.attachments(id, version));
+tool("upload_intent_attachments", intentRouting +
+  "Upload local screenshot/PoC files to an EXISTING draft. Returns inline {F...} references; " +
+  "insert them into the full replacement description with update_report_intent on the SAME id and version. " +
+  "Never create a replacement draft or reuse another intent's references. Credential paths are blocked; 25MB total per call.",
+  { id: z.string(), file_paths: z.array(z.string()).min(1).max(16), version: intentVersion },
+  ({ id, file_paths, version }) => intents.upload(id, file_paths, version), CREATES);
+tool("delete_intent_attachment", intentRouting + "Remove one attachment belonging to this draft.",
+  { id: z.string(), attachment_id: z.string(), version: intentVersion },
+  ({ id, attachment_id, version }) => intents.removeAttachment(id, attachment_id, version), DESTRUCTIVE);
+
+// ══ Optional Report Assistant V2 (web-session path) ═══════════════
+const v2Context =
+  "Optional V2 path: requires H1_V2_* HuntProxy web-session configuration; HTTP-only after login. " +
+  "Never silently switch from public REST. ";
+const v2IntentId = z.string().regex(/^[1-9]\d*$/).describe("Positive numeric report intent id (not a GraphQL id)");
+
+tool(
+  "get_report_assistant_v2_status",
+  v2Context + "Check optional V2 configuration/status before choosing this separate workflow.",
+  {},
+  () => reportAssistantV2().status()
+);
+
+tool(
+  "search_report_programs_v2",
+  v2Context + "Search programs available to Report Assistant V2.",
+  { search: z.string().describe("Program search text") },
+  ({ search }) => reportAssistantV2().programs(search)
+);
+
+tool(
+  "list_report_intents_v2",
+  v2Context + "List private V2 report drafts with optional search and pagination.",
   {
-    program_handle: programHandle,
-    description: z.string().describe("Vulnerability details in markdown; may be reformatted by HackerOne"),
-    wait: z
-      .boolean()
-      .optional()
-      .describe("Wait for HackerOne's assistant to finish reformatting (default true)"),
+    search: z.string().optional().describe("Draft search text"),
+    after: z.string().optional().describe("Opaque pagination cursor returned by a previous list"),
   },
-  (p) => h1.createReportIntent(p),
+  ({ search, after }) => reportAssistantV2().list(search, after)
+);
+
+tool(
+  "get_report_intent_v2",
+  v2Context + "Read and review a V2 draft, including updated_at for optimistic concurrency at submission. " +
+    "Use attachment references only as returned for this same intent; never reuse different draft ids.",
+  { id: v2IntentId },
+  ({ id }) => reportAssistantV2().get(id)
+);
+
+tool(
+  "create_report_intent_v2",
+  v2Context + "Create a NEW empty private draft for a program. Accepts only program_handle; " +
+    "then use update_report_intent_v2 on the returned id. Every create makes a separate draft; " +
+    "never create a replacement to revise an existing draft or reuse attachment references from different draft ids.",
+  { program_handle: programHandle },
+  ({ program_handle }) => reportAssistantV2().create(program_handle),
   CREATES
 );
 
-tool("list_report_intents", "List your HackerOne report intents and their states.", {}, () =>
-  h1.listReportIntents()
-);
-
-tool("get_report_intent", "Get one report intent by id.", { id: z.string() }, ({ id }) =>
-  h1.getReportIntent(id)
-);
-
 tool(
-  "update_report_intent",
-  "Edit, revise, or replace an existing draft report intent IN PLACE, keeping its id and attachments. " +
-    "Use this to update a draft, including adding inline {F...} references after upload_intent_attachments. " +
-    "Pass the full replacement description and only attachment references returned for this same intent. " +
-    "create_report_intent creates a separate draft each time. Description is the only editable field — title is generated by HackerOne. " +
-    "Verifies that a changed description is visible after assistant processing; HTTP success alone is insufficient. " +
-    "Returns update_status ('description_changed' or 'already_current') and description_matches_request. " +
-    "The assistant may rewrite the text, so review the returned description. " +
-    "Throws a tool error if no changed description is observed within timeout_ms or processing remains pending, " +
-    "including silent no-ops in update_required. A pending draft is rejected before PATCH; use wait_for_intent_ready first. " +
-    "Never retries the write or creates a replacement draft. Inspect the draft and assistant feedback before retrying an unconfirmed update. " +
-    "Creates and updates share a tight rate limit (~4 per 10 minutes), so combine edits into one update.",
+  "update_report_intent_v2",
+  v2Context + "Update an existing private draft in place; supply at least one update field. " +
+    "Combine edits because repeated saves can queue assistant processing. Review the result before submitting. " +
+    "For inline attachments use only the returned reference for this same intent, never references from different draft ids. " +
+    "Scope and weakness ids are opaque GraphQL ids, not public REST numeric ids.",
   {
-    id: z.string().describe("Report intent id"),
-    description: z.string().describe("Full replacement description in markdown, including any {F...} references from this intent's attachments"),
-    timeout_ms: z.number().min(1000).max(300000).optional().describe("Maximum wait to observe a changed description and settled processing (default 60s); unconfirmed updates return a tool error"),
+    id: v2IntentId,
+    title: z.string().max(150).optional(),
+    description: z.string().optional().describe("Replacement vulnerability description in markdown"),
+    impact: z.string().optional(),
+    severity_rating: severity.optional(),
+    structured_scope_id: z.string().nullable().optional().describe("Opaque GraphQL scope id; null clears it"),
+    weakness_id: z.string().nullable().optional().describe("Opaque GraphQL weakness id; null clears it"),
+    custom_field_values: z.array(z.object({
+      custom_field_attribute_id: z.number().int().positive(),
+      value: z.string(),
+    })).optional(),
   },
-  ({ id, description, timeout_ms }) => h1.updateReportIntent(id, description, timeout_ms),
+  ({ id, ...fields }) => reportAssistantV2().update(id, fields),
   UPDATES
 );
 
-tool("delete_report_intent", "Delete a report intent.", { id: z.string() }, ({ id }) =>
-  h1.deleteReportIntent(id),
-  DESTRUCTIVE
-);
-
 tool(
-  "wait_for_intent_ready",
-  "Poll a report intent until HackerOne's assistant job finishes and the state settles.",
+  "upload_intent_attachments_v2",
+  v2Context + "Upload local files to an existing V2 draft. Use only each returned reference exactly as returned " +
+    "in update_report_intent_v2 on the SAME intent id. Never reuse references from different draft ids; " +
+    "re-uploading may create new attachments.",
   {
-    id: z.string().describe("Report intent id"),
-    timeout_ms: z.number().min(1000).max(300000).optional().describe("Give up after this long (default 60s)"),
+    id: v2IntentId,
+    file_paths: z.array(z.string()).min(1).max(16).describe("Absolute local file paths to upload (1–16)"),
   },
-  ({ id, timeout_ms }) => h1.waitForIntentReady(id, timeout_ms)
-);
-
-tool(
-  "submit_report_intent",
-  "Convert a report intent into a real submitted report. IRREVERSIBLE. " +
-    "Requires confirm=true, which you may only pass after the user has explicitly approved this exact submission.",
-  {
-    id: z.string().describe("Report intent id"),
-    confirm: z
-      .boolean()
-      .describe(
-        "Must be true. Files a real, irreversible report against a real program. " +
-        "Set this ONLY when the user has approved this specific submission in their own words — " +
-        "never merely because the schema requires the field."
-      ),
-  },
-  ({ id, confirm }) => h1.submitReportIntent(id, confirm),
-  DESTRUCTIVE
-);
-
-tool("list_intent_attachments", "List files attached to a report intent and their inline {F...} references. Use these references only in this intent's description via update_report_intent.", { id: z.string() }, ({ id }) =>
-  h1.listIntentAttachments(id)
-);
-
-tool(
-  "upload_intent_attachments",
-  "Upload local files (screenshots, PoC scripts, HTTP logs) to an existing report intent. " +
-    "Returns attachment ids and inline {F...} references. After uploading, use update_report_intent with the SAME intent id " +
-    "and a full description containing those references. Each upload produces new attachment ids; " +
-    "do not reuse references from another draft or call create_report_intent to revise the description.",
-  {
-    id: z.string().describe("Report intent id"),
-    file_paths: z.array(z.string()).min(1).describe("Absolute paths of files to upload"),
-  },
-  ({ id, file_paths }) => h1.uploadIntentAttachments(id, file_paths),
+  ({ id, file_paths }) => reportAssistantV2().upload(id, file_paths),
   CREATES
 );
 
 tool(
-  "delete_intent_attachment",
-  "Remove one attachment from a report intent.",
-  { id: z.string().describe("Report intent id"), attachment_id: z.string() },
-  ({ id, attachment_id }) => h1.deleteIntentAttachment(id, attachment_id),
+  "delete_intent_attachment_v2",
+  v2Context + "Remove an attachment from this V2 draft only. Never substitute a different draft id; " +
+    "remove stale inline references from the same draft description as needed.",
+  {
+    id: v2IntentId,
+    attachment_id: z.string().regex(/^[1-9]\d*$/).describe("Positive numeric attachment id from this intent"),
+  },
+  ({ id, attachment_id }) => reportAssistantV2().removeAttachment(id, attachment_id),
+  DESTRUCTIVE
+);
+
+tool(
+  "submit_report_intent_v2",
+  v2Context + "IRREVERSIBLY submit the reviewed V2 draft. Final submission is not live verified. " +
+    "Requires explicit user approval of this exact submission before confirm=true; never infer approval from a schema. " +
+    "Pass expected_updated_at from the reviewed draft for optimistic concurrency; if it changed, review again " +
+    "and obtain fresh approval rather than silently retrying or switching to public REST.",
+  {
+    id: v2IntentId,
+    confirm: z.boolean().describe("True only after explicit user approval of this exact irreversible submission"),
+    expected_updated_at: z.string().min(1).describe("Exact updated_at from the draft the user reviewed and approved"),
+  },
+  ({ id, confirm, expected_updated_at }) => reportAssistantV2().submit(id, confirm, expected_updated_at),
   DESTRUCTIVE
 );
 
@@ -440,8 +513,8 @@ tool(
     "Run validate_report first to catch out-of-scope assets and unaccepted weaknesses. " +
     "Most programs require severity_rating ('none' counts; omitting it does not) and answer 422 without it. " +
     "TRADE-OFF: this path can set severity, weakness and scope but CANNOT carry attachments. " +
-    "The report-intent path can carry attachments but cannot set any of those three. " +
-    "If the finding needs a screenshot or PoC file, use create_report_intent instead. " +
+    "Prefer the configured V2 intent path when attachments and manual severity are both needed. " +
+    "The V1 public intent path supports attachments but cannot set severity, weakness or scope. " +
     "Requires confirm=true, which you may only pass after explicit user approval.",
   {
     program_handle: programHandle,

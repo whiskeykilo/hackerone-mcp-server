@@ -45,7 +45,19 @@ function describeApiError(
       " — rate limited. Do NOT retry immediately: on report_intents, retrying" +
       " during a lockout appears to extend it. Wait ~10 minutes of full silence.",
   };
-  const hint = hints[status] ?? "";
+  const manualSeverityRequired =
+    (status === 400 || status === 422) &&
+    method === "POST" &&
+    /\/report_intents\/\d+\/submit$/.test(path) &&
+    /manual severity/i.test(body);
+  const hint = manualSeverityRequired
+    ? " — the Report Assistant V1 may require a manual severity rating without exposing a selector." +
+      " The public report-intent API has no documented severity update field." +
+      " Review the draft in Report Assistant V2 if available, or use the standard report form to select severity." +
+      " The direct submit_report tool accepts severity_rating but cannot carry attachments;" +
+      " do not switch submission paths without reviewing the content and getting fresh user approval." +
+      " This submission was not retried and no replacement draft was created"
+    : hints[status] ?? "";
   return `HackerOne API error ${status} on ${method} ${path}${hint}: ${trimmed}`;
 }
 
@@ -82,6 +94,8 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60_000;
+const CACHE_MAX_ENTRIES = 500;
+let cacheAuth: string | undefined;
 
 function cacheGet(key: string): any | undefined {
   const entry = cache.get(key);
@@ -257,14 +271,23 @@ export interface RequestOpts {
   /** Pre-built body (e.g. FormData); sent as-is with no Content-Type header. */
   rawBody?: BodyInit;
   skipCache?: boolean;
-  /** Absolute URL, used to follow JSON:API `links.next`. */
+  /** Absolute HackerOne API URL, used to follow JSON:API `links.next`. */
   url?: string;
   maxAttempts?: number;
 }
 
 export async function h1Request(path: string, opts: RequestOpts = {}): Promise<any> {
-  const method = opts.method ?? "GET";
+  const method = (opts.method ?? "GET").toUpperCase();
   const url = new URL(opts.url ?? `${H1_BASE}${path}`);
+  // Pagination links are server-provided, not trusted destinations for auth.
+  if (url.origin !== new URL(H1_BASE).origin || !url.pathname.startsWith("/v1/") || url.username || url.password) {
+    throw new Error("Refusing non-HackerOne API URL; credentials were not sent.");
+  }
+  const auth = getAuth();
+  if (cacheAuth !== auth) {
+    cache.clear();
+    cacheAuth = auth;
+  }
   if (opts.params) {
     for (const [k, v] of Object.entries(opts.params)) {
       if (v != null && v !== "") url.searchParams.set(k, v);
@@ -289,7 +312,7 @@ export async function h1Request(path: string, opts: RequestOpts = {}): Promise<a
     let res: Response;
     try {
       const headers: Record<string, string> = {
-        Authorization: `Basic ${getAuth()}`,
+        Authorization: `Basic ${auth}`,
         Accept: "application/json",
       };
       let body: BodyInit | undefined;
@@ -299,7 +322,11 @@ export async function h1Request(path: string, opts: RequestOpts = {}): Promise<a
         headers["Content-Type"] = "application/json";
         body = JSON.stringify(opts.body);
       }
-      res = await fetch(url.toString(), { method, headers, body });
+      res = await fetch(url.toString(), {
+        method, headers, body,
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      });
     } catch (err: any) {
       // Network-level failure. We cannot tell "never arrived" from "arrived,
       // processed, response lost" — so retrying a POST/PATCH risks filing a
@@ -337,7 +364,10 @@ export async function h1Request(path: string, opts: RequestOpts = {}): Promise<a
 
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
-    if (isRead) cache.set(cacheKey, { data: json, expiresAt: Date.now() + CACHE_TTL_MS });
+    if (isRead && cacheAuth === auth) {
+      if (cache.size >= CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value!);
+      cache.set(cacheKey, { data: json, expiresAt: Date.now() + CACHE_TTL_MS });
+    }
     return json;
   }
 
@@ -374,21 +404,21 @@ export async function h1FetchAll(
   params?: Record<string, string | undefined>,
   maxPages = 20
 ): Promise<PagedResult> {
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error("maxPages must be a positive integer");
+  }
   const all: any[] = [];
-  let page = await h1Request(path, {
-    params: { "page[size]": "100", ...params },
-  });
-
-  let i = 0;
-  for (; i < maxPages; i++) {
+  let next: string | undefined;
+  for (let pages = 1; pages <= maxPages; pages++) {
+    const page = await h1Request(path, next
+      ? { url: next }
+      : { params: { "page[size]": "100", ...params } });
     const rows = page.data ?? [];
     all.push(...rows);
-    const next = page.links?.next;
+    next = page.links?.next;
     if (!next || rows.length === 0) {
-      return { rows: all, truncated: false, pages: i + 1 };
+      return { rows: all, truncated: false, pages };
     }
-    page = await h1Request(path, { url: next });
   }
-  // Fell out of the loop with a `next` link still pending.
-  return { rows: all, truncated: true, pages: i };
+  return { rows: all, truncated: true, pages: maxPages };
 }

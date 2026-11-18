@@ -1,3 +1,4 @@
+import { readAttachmentFiles } from "./attachments.js";
 import { classifyAwaiting, type AwaitingVerdict } from "./awaiting.js";
 import { H1_BASE, h1FetchAll, h1Request, sleep } from "./http.js";
 
@@ -1269,49 +1270,10 @@ export async function listIntentAttachments(id: string) {
   }));
 }
 
-// This tool sends local files to a third party, so it refuses the paths an
-// agent is most likely to be talked into exfiltrating — including the very
-// file holding this server's own HackerOne token.
-const BLOCKED_ATTACHMENT_PATTERNS: RegExp[] = [
-  /(^|\/)\.claude\.json$/,
-  /(^|\/)\.claude\//,
-  /(^|\/)\.ssh\//,
-  /(^|\/)\.aws\//,
-  /(^|\/)\.gnupg\//,
-  /(^|\/)\.netrc$/,
-  /(^|\/)\.env(\.|$)/,
-  /(^|\/)id_(rsa|dsa|ecdsa|ed25519)$/,
-  /(^|\/)(shadow|passwd)$/,
-  /\.pem$/,
-  /\.p12$/,
-  /\.pfx$/,
-  /(^|\/)credentials$/,
-];
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-
 export async function uploadIntentAttachments(id: string, filePaths: string[]) {
-  const { readFile } = await import("fs/promises");
-  const { basename, resolve } = await import("path");
-
   const form = new FormData();
-  for (const p of filePaths) {
-    const abs = resolve(p);
-    const blocked = BLOCKED_ATTACHMENT_PATTERNS.find((re) => re.test(abs));
-    if (blocked) {
-      throw new Error(
-        `Refusing to upload '${abs}': it matches a credential/secret path pattern. ` +
-          `This tool sends files to HackerOne. If the file is genuinely a proof of ` +
-          `concept, copy the relevant excerpt to a new file and upload that instead.`
-      );
-    }
-    const buf = await readFile(abs);
-    if (buf.byteLength > MAX_ATTACHMENT_BYTES) {
-      throw new Error(
-        `Refusing to upload '${abs}': ${(buf.byteLength / 1048576).toFixed(1)}MB ` +
-          `exceeds the ${MAX_ATTACHMENT_BYTES / 1048576}MB cap.`
-      );
-    }
-    form.append("files[]", new Blob([new Uint8Array(buf)]), basename(abs));
+  for (const file of await readAttachmentFiles(filePaths)) {
+    form.append("files[]", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
   }
 
   const result = await h1Request(`/hackers/report_intents/${id}/attachments`, {
